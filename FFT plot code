@@ -1,0 +1,33 @@
+# Define function in first code block, under the main plotting block in original code
+def freq_fft(t,data_t):
+    nfft = len(data_t) # number of points
+    dt = t[1]-t[0]  # time interval
+    maxf = 1/dt     # maximum frequency
+    df = 1/np.max(t)   # frequency interval
+    f_fft = np.arange(-maxf/2,maxf/2+df,df)          # define frequency domain
+
+    ## DO FFT
+    data_f = np.fft.fftshift(np.fft.fft(data_t)) # FFT of data
+
+    return f_fft, data_f
+
+# Code block 2     
+fig = plt.figure()
+# ax1 = fig.add_subplot(2,1,1)
+# fig.show()
+
+plt.plot(t,data_plot)
+plt.plot(t_filtered,data_plot_filtered)
+plt.show()
+
+plt.figure()
+f_fft, data_f = freq_fft(t, data_plot)
+amps = 2*abs(data_f) / data_f.size
+plt.plot(f_fft, amps)
+
+f_fft, data_f_smooth = freq_fft(t_filtered, abs(data_plot_filtered))
+amps_smooth = 2*abs(data_f_smooth) / data_f.size
+plt.plot(f_fft, amps_smooth)
+plt.xlim(0,10)
+plt.ylim(0,20)
+plt.show()
