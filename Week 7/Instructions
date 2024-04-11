@@ -1,0 +1,9 @@
+Document instructions:
+Look<x>: The time starts with the user looking straight, and then every 4 seconds, the user looks in the specified direction x and immediately returns their eyes to the centre. 
+LookLeftHold: User starts with eyes looking straight. They then move their eyes left at 4 seconds and hold their eyes there. After another 4 seconds, they move their eyes back to looking forward and remain here for 4 seconds. We then repeat this. Every negative peak is the user moving eyes left, and the positive peaks are them moving eyes back to centre.
+LookRightHold is the same but for looking right instead of left. This is the same for LookUpHold and LookDownHold.
+LookRightHold2 is the same as LookRightHold, but includes a blink before every eye movement. I.e. before the user moves eyes to the right, they do a single blink. There are no other blinks during the entire time.
+LookRightHold3 involves the user initially looking straight for 4 seconds, then taking 2 seconds to look right, then holding here for 4 seconds, then taking 2 seconds to look back to straight. Repeat.
+Blink: The user deliberately blinks every 4 seconds. Blink2 is the exact same.
+EyebrowRaise: Initially looks straight for 4 seconds, then raise eyebrows and immediately bring them back to normal. Do this every 4 seconds.
+EyebrowRaiseHold: Look straight for 4 seconds, then raise eyebrows and hold for 4 seconds. Lower eyebrows to normal after these 4 seconds. Repeat.
