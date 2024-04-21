@@ -1,0 +1,355 @@
+---
+title: 'DATA/PHYS3888 R-Code'
+author: 'Brain10 Group'
+date: '2024-04-21'
+output:
+  html_document:
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    code_folding: hide
+---
+
+### Looking at a single WAV file
+
+Conducting some basic exploration of the data
+
+```{r, message = FALSE}
+
+# loading necessary packages
+
+library(tidyverse)
+library(tuneR)
+library(devtools)
+library(ggplot2)
+library(tsfeatures)
+
+# loading in the data 
+# data is eye movement data recorded by two physics tutors using a Spiker box
+
+waveSeq <- readWave('/Users/sfoulsham/Desktop/data3888/brainbox/LRL_L3.wav')
+
+# some basic exploration 
+
+waveSeq
+slotNames(waveSeq)
+
+# setting up some variables
+
+timeSeq <- seq_len(length(waveSeq))/waveSeq@samp.rate 
+
+# plotting some eye movement data
+
+plot(timeSeq, waveSeq@left, type = "l", ylab="Signal", xlab="Time (seconds)")
+
+```
+
+Want to be able to define when an eye movement did or did not occur, need to set up windows and take the standard deviation of each window 
+
+```{r, message = FALSE}
+
+# setting up some variables 
+# including the windows (each is 0.5 seconds)
+
+windowSize = 0.5
+downSampleRate = 100
+ind = seq_len(which(timeSeq == timeSeq[length(timeSeq)] - windowSize) + 1)
+ind = seq(1, length(ind), by = downSampleRate)
+
+# to determine if there was an event (eye movement)
+# will look at the standard deviation within each window 
+
+df <- data.frame(Y = waveSeq@left, 
+                 time = timeSeq,
+                 event_type = "none",
+                 event_time = NA,
+                 event_pos = NA)
+
+testStat = rep(NA, length(ind))
+
+for (i in 1:length(ind)) {
+  testStat[i] <- sd(df$Y[df$time >= df$time[ind[i]] & df$time < df$time[ind[i]] + windowSize])
+}
+
+# plot shows the standard deviation of each window across time
+# the spikes evidently represent events
+
+plot(testStat, type="l")
+
+# might also want to look at maximum and zero cross over
+# are two other statistics we could use instead of standard deviation 
+
+testStat = testStat1 = testStat2 = rep(NA, length(ind))
+stat_event <- rep(NA, length(ind))
+
+for (i in 1:length(ind)) {
+  Y_subset <- df$Y[df$time >= df$time[ind[i]] & df$time < df$time[ind[i]] + windowSize]
+  
+  testStat[i] <- sd(Y_subset)
+  testStat1[i] = max(Y_subset)
+  testStat2[i] = sum(Y_subset[1:(length(Y_subset) - 1)] * Y_subset[2:(length(Y_subset))] <= 0)
+}
+
+matplot(cbind(testStat, testStat1, testStat2*10), type="l", lty=1, ylab="statistics")
+legend("topright", c("SD", "max", "zerocrossing"), lty=1, col=1:3)
+
+```
+
+Creating a function to classify whether an eye movement did or did not occur
+
+```{r, message = FALSE}
+
+# input is the wave values and times
+# output is the times corresponding to the events (eye movements)
+
+eye_movement_ZC = function(Y, time, 
+                           windowSize = 0.5, 
+                           thresholdEvents = 20,
+                           downSampleRate = 50) {
+  
+  ind = seq_len(which(time == round(time[length(time)] - windowSize, 4)) + 1)
+  ind = seq(1, ind[length(ind)], by = downSampleRate)
+
+  timeMiddle <- time[ind] + windowSize/2 
+  testStat = rep(NA, length(ind))
+  
+  for (i in 1:length(ind)) {
+    Y_subset <- Y[time >= time[ind[i]] & time < time[ind[i]] + windowSize]
+    testStat[i] <- sum(Y_subset[1:(length(Y_subset) - 1)] * Y_subset[2:(length(Y_subset))] <= 0)
+  }
+  
+  predictedEvent <- which(testStat < thresholdEvents)
+  eventTimes <- timeMiddle[predictedEvent] 
+  gaps <- which(diff(eventTimes) > windowSize)
+  
+  event_time_interval <- min(eventTimes)
+  for (i in 1:length(gaps)) {
+    event_time_interval <- append(event_time_interval, 
+                                  c(eventTimes[gaps[i]],
+                                    eventTimes[gaps[i] + 1]))
+  }
+  event_time_interval <- append(event_time_interval, max(eventTimes))
+  event_time_interval <- matrix(event_time_interval, ncol = 2, byrow = TRUE)
+  
+  predictedEventTimes <- rep(FALSE, length(Y))
+  for (i in 1:nrow(event_time_interval)) {
+    predictedEventTimes[event_time_interval[i, 1] <= time & event_time_interval[i, 2] >= time] <- TRUE
+  }
+  
+  num_event <- length(gaps) + 1
+  return(list(num_event = num_event, 
+              predictedEventTimes = predictedEventTimes,
+              predictedInterval = event_time_interval))
+}
+
+eye_movement_ZC(Y = waveSeq@left, time = timeSeq)$predictedInterval
+
+```
+
+Visualising the results of this function 
+
+```{r, message = FALSE}
+
+eye_movement_results <- eye_movement_ZC(Y = waveSeq@left, time = timeSeq)
+
+predicted_intervals <- eye_movement_results$predictedInterval
+
+plot(timeSeq, waveSeq@left, type = "l", ylab = "Signal", xlab = "Time (seconds)")
+
+for (i in 1:nrow(predicted_intervals)) {
+  polygon(c(predicted_intervals[i, 1], 
+            predicted_intervals[i, 2],
+            predicted_intervals[i, 2], 
+            predicted_intervals[i, 1]),
+          c(min(waveSeq@left), 
+            min(waveSeq@left), 
+            max(waveSeq@left),
+            max(waveSeq@left)),
+          col = rgb(0.5, 
+                    0.8, 
+                    0.5, 
+                    alpha = 0.3), 
+          border = NA)
+}
+
+```
+
+### Looking at multiple WAV files
+
+Creating a basic function to classify eye movements as left or right
+
+```{r, message = FALSE, results = 'hide'}
+
+# reading in some more data, specifically the short sequence data 
+
+dir_short = '/Users/sfoulsham/Desktop/data3888/brainbox/Spiker_box_Louis/Short'
+all_files_short <- list.files(dir_short)
+
+wave_file_short <- list()
+for (i in all_files_short) {
+  wave_file_short[[i]] <- readWave(file.path(dir_short, i))
+}
+
+# setting up more functions and loops  
+
+extractSignal = function(limits, seq, xtime) {
+  index = (xtime > limits[1]) & (xtime < limits[2])
+  return(seq[index])
+}
+
+wave_seq_short = list()
+for(i in 1:length(wave_file_short)) {
+  print(i)
+  wave_file = wave_file_short[[i]]
+  Y = wave_file@left
+  xtime = seq_len(length(wave_file))/wave_file@samp.rate 
+  cut_result = eye_movement_ZC(Y, xtime)
+  wave_seq_short[[i]] = apply(cut_result$predictedInterval, 1, extractSignal, Y, xtime)
+}
+
+# creating a basic classification function 
+# basic left, right classification
+
+LR_detection = function(seq) {
+  maxval = which.max(seq, na.rm=TRUE)
+  minval = which.min(seq, na.rm=TRUE)
+  movement = ifelse(maxval < minval,  "L", "R")
+  return(movement)
+}
+
+```
+
+Creating a model-based classifier to categorise eye movements as left or right
+
+```{r, message = FALSE}
+
+# loading in more data
+
+wave_seq_short = readRDS('/Users/sfoulsham/Desktop/data3888/brainbox/wave_seq_short_list_zoe.rds')
+wave_label_short = readRDS('/Users/sfoulsham/Desktop/data3888/brainbox/wave_label_short_results.rds')
+
+Y_list = unlist(wave_seq_short, recursive=FALSE)
+Y_lab = unlist(wave_label_short)
+
+Y_features <- cbind(
+  tsfeatures(Y_list,
+             c("acf_features","entropy","lumpiness",
+               "flat_spots","crossing_points")),
+  tsfeatures(Y_list, "max_kl_shift", width=48),
+  tsfeatures(Y_list,
+             c("mean","var"), scale=FALSE, na.rm=TRUE),
+  tsfeatures(Y_list,
+             c("max_level_shift","max_var_shift"), trim=TRUE)) 
+
+# creating a model-based classifier
+
+X = as.matrix(Y_features)
+y = Y_lab 
+
+cvK = 5
+cv_50acc5_knn = cv_acc5 = c()
+
+for (i in 1:50) {
+  cvSets = cvTools::cvFolds(nrow(X), cvK)
+  
+  cv_acc = NA 
+  for (j in 1:cvK) {
+    test_id = cvSets$subsets[cvSets$which == j]
+    X_test = X[test_id, ]
+    X_train = X[-test_id, ]
+    y_test = y[test_id]
+    y_train = y[-test_id]
+    fit = class::knn(train = X_train, test = X_test, cl = y_train, k = 3)
+    cv_acc5[j] = table(fit, y_test) %>% diag %>% sum %>% `/`(length(y_test))
+  }
+  cv_50acc5_knn <- append(cv_50acc5_knn, mean(cv_acc5))
+}
+
+# printing the accuracy through a boxplot
+
+boxplot(cv_50acc5_knn, horizontal = TRUE, xlab="Accuracy")
+
+```
+
+### Attempting a streaming classifer
+
+Utilising a while loop to classify events
+
+```{r, message = FALSE}
+
+window_size = waveSeq@samp.rate
+increment = window_size/3
+Y = waveSeq@left
+
+statSignal = c(NA,NA)
+lower_interval = 1
+xtime = seq_len(length(waveSeq))/waveSeq@samp.rate 
+max_time = max(xtime)*window_size
+  
+while(max_time > lower_interval + window_size)
+  {
+  upper_interval = lower_interval + window_size
+  interval = Y[lower_interval:upper_interval]
+  midpoint = (lower_interval + upper_interval)/2
+  calstat = sd(interval)
+  statSignal = rbind(statSignal, c(midpoint, calstat))
+  lower_interval = lower_interval + increment 
+  }
+
+df_line <- data.frame(Y)
+df_line$x <- c(1:nrow(df_line))
+df_point <- data.frame(statSignal[-1, ])
+
+ggplot() +  geom_line(data = df_line, 
+                      aes(x = x , 
+                          y = Y) ) + 
+  geom_point(data = df_point, 
+             aes(x= X1, y = X2), 
+             colour  = "green", 
+             size = 4, 
+             shape = 18) + 
+  geom_line(data = df_point, 
+            aes(x= X1, y = X2), 
+            colour = "green") + 
+  xlab("Index") 
+
+```
+
+Creating a function to apply our while loop, eye_movement_ZC and LR_detection functions to live data
+
+```{r, message = FALSE}
+
+streaming_classifier = function(wave_file,
+                                window_multiplier = 1) {
+  
+  window_size = wave_file@samp.rate * window_multiplier
+  increment = window_size / 3
+  
+  Y = wave_file@left
+  xtime = seq_len(length(Y)) / wave_file@samp.rate 
+  predicted_labels = c()
+  window_lb = 1 
+  max_time = length(Y)
+  
+  while (max_time > window_lb + window_size) {
+    
+    window_ub = window_lb + window_size
+    window = Y[window_lb:window_ub]
+
+    event = eye_movement_ZC(window, xtime[window_lb:window_ub])
+    
+    if (event) {
+      predicted = LR_detection(window)
+      predicted_labels = c(predicted_labels, predicted)
+      window_lb = window_lb + window_size 
+    } else {
+      window_lb = window_lb + increment 
+    }
+  }
+  return(paste(predicted_labels, collapse = ""))
+}
+
+```
