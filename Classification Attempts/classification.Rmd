@@ -1,0 +1,223 @@
+---
+title: "3888 project"
+output: html_document
+date: "2024-04-09"
+---
+
+```{r}
+library(ggplot2)
+
+# Load the data
+voltage <- scan("Dartright/dartright7.txt", what = numeric())    # dartleft/dartleft1.txt Dartright/dartright3.txt
+
+# Generate time data
+total_time <- 20  # total time in seconds
+n_points <- length(voltage)
+time <- seq(0, total_time, length.out = n_points)
+
+# Create a dataframe
+data <- data.frame(Time = time, Voltage = voltage)
+
+# Check the structure
+print(head(data))
+str(data)
+
+# Plot
+ggplot(data, aes(x = Time, y = Voltage)) +
+  geom_line(colour = "blue") +
+  theme_minimal() +
+  labs(title = "Voltage Over Time", x = "Time (seconds)", y = "Voltage")
+           
+```
+
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# Load voltage data
+voltage <- scan("Dartright/dartright7.txt", what = numeric())
+
+# Generate time data
+total_time <- 20  # total duration in seconds
+n_points <- length(voltage)
+time <- seq(0, total_time, length.out = n_points)
+
+# Calculate smoothed voltage using a simple moving average
+window_size <- 5  # Change this based on your specific needs
+smoothed_voltage <- stats::filter(voltage, rep(1/window_size, window_size), sides = 2)
+
+# Create a dataframe
+data <- tibble(Time = time, Voltage = voltage, Smoothed.Voltage = smoothed_voltage)
+
+# Plot the data
+ggplot(data, aes(x = Time)) +
+  geom_line(aes(y = Voltage), colour = "blue") +
+  geom_line(aes(y = Smoothed.Voltage), colour = "red") +
+  theme_minimal() +
+  labs(title = "Voltage Over Time", y = "Voltage", x = "Time (seconds)")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+voltage <- scan("Dartright/dartright7.txt", what = numeric())
+
+window_size <- 0.5
+downsample_rate <- 100
+
+sampling_rate <- 1 / median(diff(data$Time))
+window_points <- window_size * sampling_rate
+
+seq_len <- nrow(data)
+inds <- seq(1, seq_len, by = downsample_rate)
+std_devs <- numeric(length(inds))
+
+for (i in seq_along(inds)) {
+  window_start <- max(1, inds[i])
+  window_end <- min(seq_len, window_start + window_points - 1)
+  std_devs[i] <- sd(data$Smoothed.Voltage[window_start:window_end])
+}
+
+result <- data.frame(
+  Time = data$Time[inds],
+  StdDev = std_devs
+)
+
+thresholdEvents <- 30
+
+
+predictedEvent <- which(std_devs > thresholdEvents)
+predictedEventTimes <- data$Time[predictedEvent]
+
+
+ggplot(result, aes(x = Time, y = StdDev)) +
+  geom_line() +
+  geom_hline(yintercept = thresholdEvents, color = "green") +
+  geom_vline(xintercept = predictedEventTimes, color = "red") +
+  theme_minimal() +
+  labs(title = "Standard Deviation of Smoothed Voltage over Time",
+       x = "Time (seconds)",
+       y = "Standard Deviation")
+
+
+
+```
+
+
+
+
+
+
+```{r}
+eye_movement_SD <- function(Y, time, windowSize = 0.5, thresholdEvents = 30, downSampleRate = 100) {
+  # Assuming time and Y are already available and properly aligned
+  last_index <- max(which(time <= max(time) - windowSize))
+  ind <- seq(1, last_index, by = downSampleRate)
+  
+  timeMiddle <- time[ind] + windowSize / 2 
+  testStat <- rep(NA, length(ind))
+  
+  for (i in 1:length(ind)) {
+    windowStart <- max(1, ind[i])
+    windowEnd <- min(length(Y), windowStart + windowSize * sampling_rate - 1)
+    Y_subset <- Y[windowStart:windowEnd]
+    testStat[i] <- sd(Y_subset, na.rm = TRUE)
+  }
+  
+  predictedEvent <- which(testStat > thresholdEvents)
+  eventTimes <- timeMiddle[predictedEvent]
+  gaps <- which(diff(eventTimes) > windowSize)
+  
+  event_time_interval <- min(eventTimes)
+  for (i in 1:length(gaps)) {
+    event_time_interval <- append(event_time_interval, c(eventTimes[gaps[i]], eventTimes[gaps[i] + 1]))
+  }
+  event_time_interval <- append(event_time_interval, max(eventTimes))
+  event_time_interval <- matrix(event_time_interval, ncol = 2, byrow = TRUE)
+  
+  predictedEventTimes <- rep(FALSE, length(Y))
+  for (i in 1:nrow(event_time_interval)) {
+    predictedEventTimes[time >= event_time_interval[i, 1] & time <= event_time_interval[i, 2]] <- TRUE
+  }
+  
+  num_event <- length(gaps) + 1
+  return(list(num_event = num_event, predictedEventTimes = predictedEventTimes, predictedInterval = event_time_interval))
+}
+
+results1 <- eye_movement_SD(Y = data$Smoothed.Voltage, time = data$Time, windowSize = 0.5, thresholdEvents = 30, downSampleRate = 100)
+print(results1$predictedInterval)
+
+```
+
+
+
+```{r}
+LR_detection <- function(seq) {
+  if (length(seq) == 0) {
+    return(NA)  # Return NA or a similar placeholder if there are no data points
+  }
+  maxval <- which.max(seq)
+  minval <- which.min(seq)
+  movement <- ifelse(maxval < minval, "R", "L")
+  return(movement)
+}
+
+classifications <- vector("character", nrow(results1$predictedInterval))
+
+for (i in 1:nrow(results1$predictedInterval)) {
+  start_time <- results1$predictedInterval[i, 1]
+  end_time <- results1$predictedInterval[i, 2]
+  
+  event_indices <- with(data, which(Time >= start_time & Time <= end_time))
+
+  if (length(event_indices) == 0) {
+    classifications[i] <- NA  # Assign NA or a placeholder if no indices found
+  } else {
+    classifications[i] <- LR_detection(data$Smoothed.Voltage[event_indices])
+  }
+}
+
+print(classifications)
+
+
+```
+
+
+
+
+
+
